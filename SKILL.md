@@ -66,14 +66,66 @@ python scripts/zhaopin_jobs.py --config config.json --session <session_id> \
 - 用 `present_files` 展示报告，提醒用户抽查 2-3 个岗位验证薪资
 - **必须** `bsk session stop <id>` 结束会话（即使出错也要停）
 
+### 第 5 步：投递（可选，用户要求时）
+
+报告是**投递工作台**交互版：用户勾选岗位后，AI 可直接读取并批量投递。
+
+**启动本地服务器（必须，file:// 无法被 AI navigate 且 localStorage 不共享）**：
+
+```bash
+# 报告所在目录启动静态服务器（报告通常在桌面或 output_dir）
+cd <报告所在目录> && python -m http.server 8765 --bind 127.0.0.1
+```
+
+然后导航并读取用户勾选清单：
+
+```bash
+# 导航到报告（注意用 http://127.0.0.1 而不是 file://）
+bsk navigate --session <id> "http://127.0.0.1:8765/智联_嵌入式开发_深圳_薪资15K.html"
+
+# 读取用户勾选的完整投递清单（含 URL）
+bsk evaluate --session <id> "localStorage.getItem('zp_apply_list')"
+```
+
+返回 JSON 形如：`{"count":2,"jobs":[{"title":"...","company":"...","salary":"...","url":"http://www.zhaopin.com/jobdetail/CCL..."}]}`。
+若返回 `null` → 告诉用户「请先在报告页面勾选要投的岗位」。
+
+**逐岗投递（对每个岗位的 url）**：
+
+```bash
+# 1. 打开岗位详情页
+bsk navigate --session <id> "<job.url>"
+sleep 3-5  # 等页面加载
+
+# 2. 点击「立即投递」按钮（⚠️ 必须用 evaluate 调 DOM click，见下方踩坑1）
+bsk evaluate --session <id> "var b=document.querySelector('button.a-button.a--bordered.a--filled'); if(b){b.click();'clicked'}else{'no btn'}"
+
+# 3. 验证结果（按钮文字变为「已投递」即成功）
+bsk evaluate --session <id> "document.querySelector('button.a-button.a--bordered.a--filled')?.textContent?.trim() || 'no btn'"
+
+# 4. 随机等待 5-10 秒再投下一个（防风控）
+```
+
 ## 关键设计点（给 AI 的提示）
 
 - **关键词自动加密**：智联搜索页支持 `?kw=明文关键词`，页面会重定向到
   加密编码 URL（如 `kwA96NLRO`）。脚本自动处理，AI 无需干预
 - **薪资 4 种格式**：脚本已支持「万 / K / 元 / 面议」，过滤按换算后的 K 值
 - **包含/排除词可选**：配置里留空数组 = 不启用该过滤，纯关键词抓取
-- **报告结构**：岗位卡片含标题/薪资/公司/HR活跃度/可点击链接，按薪资或
-  HR活跃度排序（`sort_by` 配置）
+- **报告=投递工作台**：紧凑网格（一屏多卡）+ 整卡点击勾选 + 排序 +
+  localStorage 持久化。勾选状态 AI 可跨标签页读取，无需借用用户标签页
+- **投递成功标志**：智联详情页「立即投递」按钮文字变为「已投递」
+- **投递前检查登录**：详情页顶部应显示用户名；若跳转登录页则停下让用户扫码
+- **已投递/岗位下架处理**：按钮为「已投递」→ 跳过；打开 404/无岗位 → 跳过并记录
+
+## 投递踩坑（实测血泪，务必遵守）
+
+| 坑 | 现象 | 解法 |
+|----|------|------|
+| **bsk overlay 拦截点击** | `bsk click @eN` 按坐标点击「立即投递」无反应，因为 bsk 注入的 `<browser-skill-overlay>` 透明层挡在页面上方 | 必须用 `bsk evaluate` 执行 `document.querySelector(...).click()` 绕过 overlay |
+| **多 AI 共用浏览器抢 tab** | 投递中 active tab 被别的会话切走，evaluate 操作到错误页面 | navigate 后先 `bsk tab list --session <id>` 确认当前 active tab 是目标详情页；投递循环中每步都校验 URL |
+| **session 空闲超时** | 隔几分钟 `evaluate` 报 `session not registered` | 重新 `bsk session start`；长时间投递中途先检查 session 状态 |
+| **本地服务器进程被关** | 报告 404 | 投递前先 `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8765/<报告名>` 确认 200 |
 
 ## 故障排查
 
@@ -83,11 +135,18 @@ python scripts/zhaopin_jobs.py --config config.json --session <session_id> \
 | 抓取 0 条 | 检查智联标签页是否登录、关键词是否有效 |
 | 城市报错 | 城市名写中文（查 `cities.json`），或直接填 jl 编码 |
 | 页面改版导致选择器失效 | 检查 `scripts/zhaopin_jobs.py` 顶部的 DOM 选择器常量 |
+| 投递按钮点不动 | bsk overlay 拦截坐标点击，改用 `evaluate` 调 `button.click()` |
+| 投递时 evaluate 操作错页面 | 多 AI 共用浏览器导致 active tab 被切换，先 `tab list` 确认再操作 |
+| 读不到用户勾选 | 报告必须通过 `http://127.0.0.1:8765` 打开（非 file://），且用户需在新地址重新勾选 |
 
 ## Red Lines
 
 1. **不做全自动爬虫**：依赖用户浏览器登录态，始终以"人机协作"方式运行，
    每次会话由用户发起
-2. **遵守智联协议**：控制抓取频率（脚本已内置 1-3 秒间隔），仅用于个人求职
-3. **不绕过登录/验证码**：遇到验证码用 `bsk request-help` 请用户处理
-4. **结束后停止会话**：`bsk session stop <id>`，避免残留 Agent 窗口
+2. **遵守智联协议**：控制抓取频率（脚本已内置 1-3 秒间隔），投递间隔
+   5-10 秒随机，单次投递不超过 30 个，仅用于个人求职
+3. **不绕过登录/验证码**：遇到验证码用 `bsk request-help` 请用户处理；
+   登录过期时停下让用户扫码，绝不尝试自动登录
+4. **投递必须用户确认**：投递是真实外部动作，先读取用户勾选清单并向
+   用户确认岗位列表，禁止擅自全量投递
+5. **结束后停止会话**：`bsk session stop <id>`，避免残留 Agent 窗口

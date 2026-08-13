@@ -269,31 +269,9 @@ def filter_jobs(jobs, config):
     return passed, filtered
 
 
-# ============ HTML 报告 ============
-def card_html(j):
-    hr_map = {2: ("hr-active", "非常活跃"), 1: ("hr-mid", "活跃"), 0: ("hr-unknown", "未知")}
-    cls, label = hr_map.get(j.get("hr_score", 0), ("hr-unknown", "未知"))
-    kw = j.get("keyword", "")
-    kw_tag = f'<span class="tag">{kw}</span>' if kw else ""
-    return f'''
-  <div class="job-card priority-{cls}">
-    <div class="card-header">
-      <div class="job-title">{j.get("title", "")}</div>
-      <span class="salary-badge">{j.get("salary", "未知")}</span>
-    </div>
-    <div class="company-row">
-      <span class="company-name">{j.get("company", "(需确认)")}</span>
-      <span class="area-name">{j.get("area", "")}</span>
-    </div>
-    <div class="tags-row">{kw_tag}<span class="tag">HR{label}</span></div>
-    <div class="card-footer">
-      <span class="hr-badge {cls}">{j.get("hr", "未知")} · {j.get("hr_reply", "回复时间未知")}</span>
-      <a href="{j.get("href", "#")}" target="_blank" class="view-btn">查看详情 →</a>
-    </div>
-  </div>'''
-
-
+# ============ HTML 报告（投递工作台版） ============
 def generate_html(passed, filtered, total, config, output_path):
+    """生成「投递工作台」交互式报告：紧凑网格 + 勾选 + localStorage 持久化 + 投递清单"""
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     sort_by = config.get("sort_by", "salary")
     if sort_by == "hr":
@@ -301,8 +279,26 @@ def generate_html(passed, filtered, total, config, output_path):
     else:
         passed.sort(key=lambda j: (-parse_salary_max(j.get("salary", "")), -j.get("hr_score", 0)))
 
-    cards = "".join(card_html(j) for j in passed)
+    # ---- 构建前端 JOBS 数据 ----
+    hr_map = {2: ("hr-active", "HR非常活跃"), 1: ("hr-mid", "HR活跃"), 0: ("hr-unknown", "HR未知")}
+    jobs_data = []
+    for j in passed:
+        cls, label = hr_map.get(j.get("hr_score", 0), ("hr-unknown", "HR未知"))
+        hr_text = f"{j.get('hr', '')} · {j.get('hr_reply', '回复时间未知')}".strip(" ·")
+        jobs_data.append({
+            "title": j.get("title", ""),
+            "salary": j.get("salary", "面议"),
+            "company": j.get("company", "(需确认)"),
+            "area": j.get("area", ""),
+            "hr_text": hr_text,
+            "hr_cls": cls,
+            "tags": [j.get("keyword", "")] if j.get("keyword") else [],
+            "url": j.get("href", "#"),
+        })
+    jobs_json = json.dumps(jobs_data, ensure_ascii=False)
+    total_jobs = len(jobs_data)
 
+    # ---- 过滤列表（前30条） ----
     filtered_html = ""
     for fj in filtered[:30]:
         reasons_str = " | ".join(fj["reasons"])
@@ -312,91 +308,287 @@ def generate_html(passed, filtered, total, config, output_path):
       <span class="filter-reason">{reasons_str}</span>
     </li>'''
 
-    html = f'''<!DOCTYPE html>
+    title = f'{config.get("job_title", "岗位")} | {config.get("city", "")} | 薪资≥{config.get("salary_min_k", 0)}K'
+
+    tpl = r"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{config.get("job_title", "岗位")} | {config.get("city", "")} | 薪资≥{config.get("salary_min_k", 0)}K</title>
+<title>投递工作台 | {{TITLE}}</title>
 <style>
-  :root {{
-    --bg:#fafafa; --surface:#fff; --text:#1a1a2e; --text-secondary:#6b7280;
-    --accent:#2563eb; --accent-soft:#eff6ff; --success:#059669; --success-soft:#ecfdf5;
-    --warning:#d97706; --warning-soft:#fffbeb; --border:#e5e7eb;
-    --shadow:0 1px 3px rgba(0,0,0,.08); --radius:8px;
+  :root {
+    --bg:#f5f6f8; --surface:#fff; --text:#1a1a2e; --text2:#6b7280;
+    --accent:#2563eb; --accent-soft:#eff6ff; --accent-border:#93c5fd;
+    --salary:#dc2626; --salary-soft:#fef2f2;
+    --ok:#059669; --ok-soft:#ecfdf5; --warn:#d97706; --warn-soft:#fffbeb;
+    --border:#e5e7eb; --radius:6px;
     --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
-  }}
-  * {{ margin:0; padding:0; box-sizing:border-box; }}
-  body {{ font-family:var(--font); background:var(--bg); color:var(--text); line-height:1.6; padding:24px; max-width:1200px; margin:0 auto; }}
-  .header {{ margin-bottom:32px; padding-bottom:20px; border-bottom:1px solid var(--border); }}
-  .header h1 {{ font-size:24px; font-weight:700; letter-spacing:-.5px; margin-bottom:8px; }}
-  .header-meta {{ display:flex; gap:16px; flex-wrap:wrap; color:var(--text-secondary); font-size:13px; }}
-  .header-meta span {{ background:var(--surface); padding:4px 10px; border-radius:4px; border:1px solid var(--border); }}
-  .stats-bar {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin-bottom:28px; }}
-  .stat-card {{ background:var(--surface); padding:16px; border-radius:var(--radius); box-shadow:var(--shadow); text-align:center; }}
-  .stat-number {{ font-size:28px; font-weight:800; }}
-  .stat-label {{ font-size:12px; color:var(--text-secondary); margin-top:2px; }}
-  .section-title {{ font-size:15px; font-weight:600; margin-bottom:14px; display:flex; align-items:center; gap:8px; }}
-  .section-title::before {{ content:''; width:3px; height:16px; background:var(--accent); border-radius:2px; }}
-  .job-grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(360px,1fr)); gap:14px; margin-bottom:32px; }}
-  .job-card {{ background:var(--surface); border-radius:var(--radius); box-shadow:var(--shadow); padding:18px; transition:all .2s; border-left:3px solid transparent; }}
-  .job-card:hover {{ transform:translateY(-1px); }}
-  .priority-hr-active {{ border-left-color:var(--success); }}
-  .priority-hr-mid {{ border-left-color:var(--warning); }}
-  .priority-hr-unknown {{ border-left-color:var(--border); }}
-  .card-header {{ display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px; }}
-  .job-title {{ font-size:15px; font-weight:600; flex:1; margin-right:8px; }}
-  .salary-badge {{ font-size:14px; font-weight:700; color:var(--success); background:var(--success-soft); padding:3px 10px; border-radius:6px; white-space:nowrap; }}
-  .company-row {{ display:flex; align-items:center; gap:8px; margin-bottom:10px; font-size:13px; color:var(--text-secondary); }}
-  .company-name {{ font-weight:500; color:var(--text); }}
-  .tags-row {{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }}
-  .tag {{ font-size:11px; padding:2px 8px; border-radius:4px; background:#f3f4f6; color:var(--text-secondary); }}
-  .card-footer {{ display:flex; justify-content:space-between; align-items:center; padding-top:12px; border-top:1px solid var(--border); }}
-  .hr-badge {{ font-size:11px; padding:3px 8px; border-radius:4px; white-space:nowrap; }}
-  .hr-active {{ background:var(--success-soft); color:var(--success); }}
-  .hr-mid {{ background:var(--warning-soft); color:var(--warning); }}
-  .hr-unknown {{ background:#f3f4f6; color:var(--text-secondary); }}
-  .view-btn {{ padding:6px 14px; font-size:13px; font-weight:500; color:#fff; background:var(--text); border:none; border-radius:6px; cursor:pointer; text-decoration:none; }}
-  .view-btn:hover {{ background:var(--accent); }}
-  .filtered-section {{ background:#fff8f8; border:1px solid #fecaca; border-radius:var(--radius); padding:18px; margin-bottom:32px; }}
-  .filtered-list {{ list-style:none; }}
-  .filtered-item {{ padding:8px 0; border-bottom:1px solid #fecaca; font-size:13px; display:flex; justify-content:space-between; align-items:center; }}
-  .filter-reason {{ font-size:11px; padding:2px 8px; background:#dc2626; color:#fff; border-radius:4px; white-space:nowrap; }}
-  .footer-note {{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px 20px; font-size:13px; color:var(--text-secondary); line-height:1.7; }}
-  @media (max-width:640px) {{ body {{ padding:12px; }} .job-grid {{ grid-template-columns:1fr; }} }}
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:var(--font); background:var(--bg); color:var(--text); font-size:13px; }
+  .toolbar {
+    position:sticky; top:0; z-index:50;
+    background:rgba(255,255,255,.96); backdrop-filter:blur(6px);
+    border-bottom:1px solid var(--border);
+    padding:8px 14px;
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+    box-shadow:0 1px 4px rgba(0,0,0,.04);
+  }
+  .toolbar .title { font-weight:700; font-size:14px; margin-right:6px; white-space:nowrap; }
+  .toolbar .stat { font-size:12px; color:var(--text2); white-space:nowrap; }
+  .toolbar .stat b { color:var(--accent); }
+  .toolbar .spacer { flex:1; }
+  .btn {
+    border:1px solid var(--border); background:var(--surface); color:var(--text);
+    padding:4px 10px; border-radius:5px; font-size:12px; cursor:pointer; white-space:nowrap;
+    transition:all .15s;
+  }
+  .btn:hover { border-color:var(--accent); color:var(--accent); }
+  .btn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .btn.primary:hover { background:#1d4ed8; color:#fff; }
+  .btn.ghost-active { background:var(--accent-soft); border-color:var(--accent-border); color:var(--accent); }
+  .btn.small { padding:2px 8px; font-size:11px; }
+  .wrap { padding:10px 14px 24px; }
+  .sync-tip {
+    background:var(--ok-soft); border:1px solid #a7f3d0; color:#047857;
+    border-radius:6px; padding:7px 12px; font-size:12px; margin-bottom:10px;
+  }
+  .job-grid {
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(252px,1fr));
+    gap:8px;
+  }
+  .job-card {
+    position:relative;
+    background:var(--surface); border:1.5px solid var(--border); border-radius:var(--radius);
+    padding:8px 10px; cursor:pointer; user-select:none;
+    transition:border-color .12s, background .12s, box-shadow .12s;
+    display:flex; flex-direction:column; gap:4px;
+  }
+  .job-card:hover { border-color:var(--accent-border); box-shadow:0 2px 6px rgba(37,99,235,.08); }
+  .job-card.selected {
+    border-color:var(--accent); background:var(--accent-soft);
+    box-shadow:0 0 0 1px var(--accent) inset;
+  }
+  .job-card .check-mark {
+    position:absolute; top:-7px; left:-7px; width:18px; height:18px;
+    background:var(--accent); color:#fff; border-radius:50%;
+    font-size:11px; font-weight:700; display:none; align-items:center; justify-content:center;
+    box-shadow:0 1px 3px rgba(0,0,0,.25);
+  }
+  .job-card.selected .check-mark { display:flex; }
+  .card-row1 { display:flex; justify-content:space-between; align-items:baseline; gap:6px; }
+  .job-title { font-size:12.5px; font-weight:600; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .salary { font-size:12px; font-weight:800; color:var(--salary); background:var(--salary-soft); padding:1px 6px; border-radius:4px; white-space:nowrap; }
+  .company-row { display:flex; gap:6px; align-items:baseline; font-size:11px; color:var(--text2); min-width:0; }
+  .company-name { font-weight:500; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .area-name { flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:45%; }
+  .tags-row { display:flex; gap:4px; flex-wrap:wrap; }
+  .tag { font-size:10px; padding:0 6px; border-radius:3px; background:#f3f4f6; color:var(--text2); }
+  .card-footer { display:flex; justify-content:space-between; align-items:center; gap:6px; padding-top:5px; border-top:1px dashed var(--border); min-width:0; }
+  .hr-badge { font-size:10px; padding:1px 6px; border-radius:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0; }
+  .hr-active { background:var(--ok-soft); color:var(--ok); }
+  .hr-mid { background:var(--warn-soft); color:var(--warn); }
+  .hr-unknown { background:#f3f4f6; color:var(--text2); }
+  .view-btn {
+    flex-shrink:0; padding:2px 10px; font-size:11px; font-weight:600;
+    color:#fff; background:var(--text); border:none; border-radius:4px; cursor:pointer; text-decoration:none;
+    pointer-events:auto; transition:background .15s;
+  }
+  .view-btn:hover { background:var(--accent); }
+  .empty { text-align:center; color:var(--text2); padding:48px 0; font-size:13px; }
+  .apply-list { display:none; }
+  .apply-list .list-head { font-size:13px; font-weight:600; margin:6px 0 10px; }
+  .apply-item {
+    display:flex; align-items:center; gap:10px; background:var(--surface);
+    border:1px solid var(--border); border-radius:5px; padding:6px 10px; margin-bottom:5px;
+  }
+  .apply-item .idx { color:var(--text2); font-size:11px; min-width:26px; text-align:right; }
+  .apply-item .ai-title { flex:1; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .apply-item .ai-company { color:var(--text2); font-size:11px; max-width:30%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .apply-item a { font-size:11px; color:var(--accent); text-decoration:none; flex-shrink:0; }
+  .apply-item a:hover { text-decoration:underline; }
+  .list-note { background:var(--accent-soft); border:1px solid var(--accent-border); border-radius:5px; padding:8px 12px; font-size:12px; color:#1e40af; margin-bottom:12px; }
+  .filtered-section { background:#fff8f8; border:1px solid #fecaca; border-radius:var(--radius); padding:12px 14px; margin-top:20px; }
+  .filtered-list { list-style:none; margin-top:8px; }
+  .filtered-item { padding:4px 0; border-bottom:1px solid #fecaca; font-size:12px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .filter-reason { font-size:10px; padding:1px 6px; background:#dc2626; color:#fff; border-radius:4px; white-space:nowrap; flex-shrink:0; }
+  @media (max-width:900px) { .job-grid { grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); } }
 </style>
 </head>
 <body>
-<div class="header">
-  <h1>🎯 {config.get("job_title", "岗位")}筛选报告</h1>
-  <div class="header-meta">
-    <span>📅 {now}</span>
-    <span>📍 {config.get("city", "")}</span>
-    <span>💰 薪资 ≥ {config.get("salary_min_k", 0)}K</span>
-    <span>🔍 关键词: {' / '.join(config.get("keywords", []))}</span>
-    <span>🔄 智联直抓 + 薪资硬过滤</span>
+<div class="toolbar">
+  <span class="title">🎯 {{TITLE}}</span>
+  <span class="stat">共 <b id="statTotal">{{TOTAL}}</b> 个 · 已选 <b id="statSel">0</b></span>
+  <span class="spacer"></span>
+  <button class="btn small" id="btnAll">全选</button>
+  <button class="btn small" id="btnInvert">反选</button>
+  <button class="btn small" id="btnNone">清空</button>
+  <button class="btn small" id="btnSortSalary">薪资 ↓</button>
+  <button class="btn small" id="btnSortHr">活跃度 ↓</button>
+  <button class="btn small ghost-active" id="btnSelOnly" title="只显示已选岗位">仅看已选</button>
+  <button class="btn small" id="btnExport" title="下载选中岗位的 JSON 清单">导出 JSON</button>
+  <button class="btn primary" id="btnApply">📋 生成投递清单</button>
+</div>
+
+<div class="wrap">
+  <div class="sync-tip">💾 勾选状态自动保存到浏览器本地 —— 告诉 AI「开始投递我勾选的岗位」即可，无需导出。</div>
+  <div id="gridView">
+    <div class="job-grid" id="jobGrid"></div>
+    <div class="empty" id="emptyTip" style="display:none">没有匹配的岗位，换个筛选条件试试。</div>
+  </div>
+
+  <div id="applyView" class="apply-list">
+    <div class="list-note">💡 投递清单已生成：AI 将按下列顺序打开每个岗位详情 → 点击「立即投递」→ 记录结果。投递前请确认浏览器已登录智联招聘。</div>
+    <div class="list-head" id="applyCount"></div>
+    <div id="applyItems"></div>
+    <button class="btn" id="btnBack">← 返回岗位网格</button>
+  </div>
+
+  <div class="filtered-section">
+    <h3 class="section-title" style="font-size:13px;margin-bottom:4px;">❌ 已过滤岗位（前30条）</h3>
+    <ul class="filtered-list">{{FILTERED}}</ul>
   </div>
 </div>
-<div class="stats-bar">
-  <div class="stat-card"><div class="stat-number">{total}</div><div class="stat-label">抓取总数</div></div>
-  <div class="stat-card"><div class="stat-number">{len(passed)}</div><div class="stat-label">✅ 符合条件</div></div>
-  <div class="stat-card"><div class="stat-number">{len(filtered)}</div><div class="stat-label">❌ 已过滤</div></div>
-</div>
-<h2 class="section-title">✅ 符合条件（{len(passed)} 个）</h2>
-<div class="job-grid">{cards}</div>
-<div class="filtered-section">
-  <h3 class="section-title" style="margin-bottom:12px;">❌ 已过滤岗位（前30条）</h3>
-  <ul class="filtered-list">{filtered_html}</ul>
-</div>
-<div class="footer-note">
-  <strong>📌 说明：</strong><br>
-  • 数据来源：智联招聘搜索，列表页直接抓取（无需点详情页）<br>
-  • 过滤规则：薪资上限 / 黑名单公司 / 包含排除词 / 派遣岗<br>
-  • 卡片绿色=HR非常活跃(≤1天)，黄色=活跃(≤7天)，灰色=未知<br>
-  • <em>— zhaopin-job-scraper 自动生成 · {now}</em>
-</div>
+
+<script>
+const JOBS = {{DATA}};
+// 勾选状态通过 localStorage 持久化：AI 可在自己的窗口打开本页后
+// evaluate `localStorage.getItem('zp_apply_list')` 直接读取用户勾选的完整投递清单
+let selected = new Set();
+try {
+  const saved = JSON.parse(localStorage.getItem('zp_selected') || '[]');
+  if (Array.isArray(saved)) selected = new Set(saved.filter(i => i >= 0 && i < JOBS.length));
+} catch(e) {}
+let sortKey = 'default';
+let selOnly = false;
+
+const gridEl = document.getElementById('jobGrid');
+const statSel = document.getElementById('statSel');
+
+function saveState(){
+  try {
+    localStorage.setItem('zp_selected', JSON.stringify(Array.from(selected)));
+    const items = JOBS.filter((_,i)=>selected.has(i)).map(j=>({title:j.title,company:j.company,salary:j.salary,area:j.area,url:j.url}));
+    localStorage.setItem('zp_apply_list', JSON.stringify({
+      generated_at: new Date().toLocaleString(),
+      count: items.length,
+      jobs: items
+    }));
+  } catch(e) {}
+}
+
+function salaryMax(s){
+  if(!s || s.includes('面议')) return -1;
+  if(s.includes('万')){
+    const m = s.match(/([\d.]+)\s*[-~至]\s*([\d.]+)/);
+    if(m) return parseFloat(m[2]) * 10;
+    const single = s.match(/([\d.]+)/);
+    return single ? parseFloat(single[0]) * 10 : 0;
+  }
+  const m = s.match(/([\d,]+)\s*[-~至]\s*([\d,]+)/);
+  if(m) return parseFloat(m[2].replace(/,/g,'')) / 1000;
+  const single = s.match(/([\d,]+)/);
+  return single ? parseFloat(single[0].replace(/,/g,'')) / 1000 : 0;
+}
+function hrScore(c){
+  return c==='hr-active' ? 2 : (c==='hr-mid' ? 1 : 0);
+}
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function getOrdered(){
+  let arr = JOBS.map((j,i)=>({j,i}));
+  if(sortKey==='salary') arr.sort((a,b)=>salaryMax(b.j.salary)-salaryMax(a.j.salary));
+  if(sortKey==='hr') arr.sort((a,b)=>hrScore(b.j.hr_cls)-hrScore(a.j.hr_cls));
+  return arr;
+}
+
+function render(){
+  gridEl.innerHTML = '';
+  let shown = 0;
+  for(const {j,i} of getOrdered()){
+    if(selOnly && !selected.has(i)) continue;
+    shown++;
+    const card = document.createElement('div');
+    card.className = 'job-card' + (selected.has(i) ? ' selected' : '');
+    card.dataset.idx = i;
+    card.innerHTML =
+      '<span class="check-mark">✓</span>' +
+      '<div class="card-row1"><span class="job-title" title="'+esc(j.title)+'">'+esc(j.title)+'</span>' +
+      '<span class="salary">'+esc(j.salary)+'</span></div>' +
+      '<div class="company-row"><span class="company-name" title="'+esc(j.company)+'">'+esc(j.company)+'</span>' +
+      (j.area ? '<span class="area-name">'+esc(j.area)+'</span>' : '') + '</div>' +
+      '<div class="tags-row">'+j.tags.map(t=>'<span class="tag">'+esc(t)+'</span>').join('')+'</div>' +
+      '<div class="card-footer">' +
+        '<span class="hr-badge '+esc(j.hr_cls)+'">'+esc(j.hr_text)+'</span>' +
+        '<a class="view-btn" href="'+esc(j.url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">详情 →</a>' +
+      '</div>';
+    card.addEventListener('click', ()=>toggle(i));
+    gridEl.appendChild(card);
+  }
+  document.getElementById('emptyTip').style.display = shown ? 'none' : 'block';
+  statSel.textContent = selected.size;
+  document.getElementById('statTotal').textContent = JOBS.length;
+}
+
+function toggle(i){
+  if(selected.has(i)) selected.delete(i); else selected.add(i);
+  saveState();
+  render();
+}
+function selectAll(){ JOBS.forEach((_,i)=>selected.add(i)); saveState(); render(); }
+function invert(){ for(let i=0;i<JOBS.length;i++){ if(selected.has(i)) selected.delete(i); else selected.add(i);} saveState(); render(); }
+function clearAll(){ selected.clear(); saveState(); render(); }
+function sortBy(k){ sortKey = (sortKey===k ? 'default' : k); render(); }
+
+document.getElementById('btnAll').onclick = selectAll;
+document.getElementById('btnInvert').onclick = invert;
+document.getElementById('btnNone').onclick = clearAll;
+document.getElementById('btnSortSalary').onclick = ()=>sortBy('salary');
+document.getElementById('btnSortHr').onclick = ()=>sortBy('hr');
+document.getElementById('btnSelOnly').onclick = function(){
+  selOnly = !selOnly;
+  this.classList.toggle('ghost-active', selOnly);
+  render();
+};
+document.getElementById('btnExport').onclick = function(){
+  const items = JOBS.filter((_,i)=>selected.has(i)).map(j=>({title:j.title,company:j.company,salary:j.salary,url:j.url}));
+  const blob = new Blob([JSON.stringify({generated_at:new Date().toLocaleString(),count:items.length,jobs:items},null,2)],{type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'zhaopin_apply_list.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+document.getElementById('btnApply').onclick = function(){
+  const items = JOBS.filter((_,i)=>selected.has(i));
+  document.getElementById('applyCount').textContent = '已选 ' + items.length + ' 个岗位，按以下顺序投递：';
+  document.getElementById('applyItems').innerHTML = items.map((j,idx)=>
+    '<div class="apply-item">' +
+      '<span class="idx">'+(idx+1)+'</span>' +
+      '<span class="ai-title">'+esc(j.title)+'</span>' +
+      '<span class="ai-company">'+esc(j.company)+'</span>' +
+      '<a href="'+esc(j.url)+'" target="_blank" rel="noopener">打开 →</a>' +
+    '</div>').join('');
+  document.getElementById('gridView').style.display = 'none';
+  document.getElementById('applyView').style.display = 'block';
+  window.scrollTo(0,0);
+};
+document.getElementById('btnBack').onclick = function(){
+  document.getElementById('applyView').style.display = 'none';
+  document.getElementById('gridView').style.display = 'block';
+};
+
+render();
+</script>
 </body>
-</html>'''
+</html>
+"""
+    html = tpl.replace("{{TITLE}}", title) \
+              .replace("{{TOTAL}}", str(total_jobs)) \
+              .replace("{{DATA}}", jobs_json) \
+              .replace("{{FILTERED}}", filtered_html or "<li>（无）</li>")
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
