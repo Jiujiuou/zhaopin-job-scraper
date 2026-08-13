@@ -1,0 +1,15 @@
+{
+  "job_title": "你的岗位名称",
+  "keywords": ["关键词1", "关键词2"],
+  "city": "城市名（如 深圳/广州/北京）",
+  "salary_min_k": 15,
+  "salary_max_k": 100,
+  "blacklist": ["公司黑名单（可选）"],
+  "include_terms": ["标题包含词（可选，留空=不过滤）"],
+  "exclude_terms": ["标题排除词（可选）"],
+  "dispatch_terms": ["派遣"],
+  "hr_active_days": 7,
+  "max_pages": 12,
+  "sort_by": "salary",
+  "output_dir": "."
+}

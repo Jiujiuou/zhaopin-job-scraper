@@ -1,0 +1,15 @@
+{
+  "job_title": "运营",
+  "keywords": ["产品运营", "内容运营", "用户运营"],
+  "city": "广州",
+  "salary_min_k": 10,
+  "salary_max_k": 100,
+  "blacklist": ["中软国际", "软通动力", "外企德科"],
+  "include_terms": ["运营", "新媒体", "增长", "用户"],
+  "exclude_terms": ["产品经理", "开发", "工程师", "销售", "客服", "主播"],
+  "dispatch_terms": ["派遣"],
+  "hr_active_days": 7,
+  "max_pages": 12,
+  "sort_by": "salary",
+  "output_dir": "."
+}

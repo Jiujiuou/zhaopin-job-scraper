@@ -1,0 +1,15 @@
+{
+  "job_title": "嵌入式开发",
+  "keywords": ["嵌入式", "嵌入式软件", "单片机"],
+  "city": "深圳",
+  "salary_min_k": 15,
+  "salary_max_k": 100,
+  "blacklist": ["中软国际", "软通动力", "外企德科", "科锐"],
+  "include_terms": ["嵌入式", "单片机", "驱动", "stm32", "arm", "rtos"],
+  "exclude_terms": ["前端", "java", "测试工程师", "算法工程师", "硬件工程师", "销售", "商务"],
+  "dispatch_terms": ["派遣"],
+  "hr_active_days": 7,
+  "max_pages": 12,
+  "sort_by": "salary",
+  "output_dir": "."
+}

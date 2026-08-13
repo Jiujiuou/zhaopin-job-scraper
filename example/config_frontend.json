@@ -1,0 +1,15 @@
+{
+  "job_title": "前端开发",
+  "keywords": ["前端", "web前端"],
+  "city": "深圳",
+  "salary_min_k": 20,
+  "salary_max_k": 100,
+  "blacklist": ["中软国际", "软通动力", "外企德科", "华为", "科锐", "华钦", "佰钧成", "博彦"],
+  "include_terms": ["前端", "web", "vue", "react", "html", "h5", "小程序"],
+  "exclude_terms": ["后端", "java", "python", "数字ic", "fpga", "商务", "营销", "测试工程师", "算法"],
+  "dispatch_terms": ["派遣"],
+  "hr_active_days": 7,
+  "max_pages": 12,
+  "sort_by": "salary",
+  "output_dir": "."
+}
